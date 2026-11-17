@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Buchscanner</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+<style>
+:root{--bg:#f6f5f1;--fg:#1c2421;--mute:#66706b;--line:#d9d8d1;--card:#fff;--acc:#1f6f5c;--accfg:#fff;--err:#b3382c}
+@media (prefers-color-scheme:dark){:root{--bg:#161a18;--fg:#e8ece9;--mute:#98a39d;--line:#2d3532;--card:#1e2421;--acc:#58b89d;--accfg:#0f1a16;--err:#e5776b}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;padding:16px;padding-top:max(16px,env(safe-area-inset-top));padding-bottom:max(16px,env(safe-area-inset-bottom))}
+main{max-width:560px;margin:0 auto}
+h1{font-size:1.4rem;margin:0 0 12px}
+button{font:inherit;border:1px solid var(--line);background:var(--card);color:var(--fg);padding:10px 14px;border-radius:8px;cursor:pointer}
+button.primary{background:var(--acc);color:var(--accfg);border-color:var(--acc);font-weight:600}
+button:focus-visible,input:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+.row>*{flex:1 1 auto}
+#reader{width:100%;border-radius:10px;overflow:hidden;background:#000;display:none}
+#reader.on{display:block}
+form{display:flex;gap:8px;margin:10px 0}
+input{flex:1;font:inherit;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--fg);min-width:0}
+#msg{min-height:1.4em;color:var(--mute);font-size:.9rem;margin:6px 0}
+#msg.err{color:var(--err)}
+ul{list-style:none;margin:12px 0;padding:0}
+li{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:8px;display:flex;gap:10px;align-items:flex-start}
+li .t{flex:1;min-width:0}
+li .title{font-weight:600;overflow-wrap:anywhere}
+li .sub{color:var(--mute);font-size:.88rem;overflow-wrap:anywhere}
+li .nf{color:var(--err)}
+li button{padding:4px 10px;flex:none}
+.count{color:var(--mute);font-size:.9rem}
+@media (prefers-reduced-motion:no-preference){li{transition:opacity .2s}}
+</style>
+</head>
+<body>
+<main>
+  <h1>Buchscanner</h1>
+
+  <div id="reader"></div>
+  <div class="row">
+    <button id="toggle" class="primary">Kamera starten</button>
+  </div>
+
+  <form id="manual">
+    <input id="isbn" inputmode="numeric" placeholder="ISBN eintippen oder einfügen" aria-label="ISBN">
+    <button type="submit">Hinzufügen</button>
+  </form>
+  <div id="msg" role="status" aria-live="polite"></div>
+
+  <div class="count"><span id="count">0</span> Bücher in der Liste</div>
+  <ul id="list"></ul>
+
+  <div class="row">
+    <button id="dl" class="primary">Als Textdatei speichern</button>
+    <button id="share">Teilen</button>
+    <button id="copy">Kopieren</button>
+    <button id="clear">Liste leeren</button>
+  </div>
+</main>
+
+<script>
+const KEY = "buchscanner.v1";
+let items = [];
+try { items = JSON.parse(localStorage.getItem(KEY)) || []; } catch (e) { items = []; }
+
+const $ = id => document.getElementById(id);
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(items)); } catch (e) {} };
+
+function msg(text, err) { const m = $("msg"); m.textContent = text; m.className = err ? "err" : ""; }
+
+// --- ISBN prüfen -----------------------------------------------------
+function normalize(s) { return String(s).replace(/[\s-]/g, "").toUpperCase(); }
+function validIsbn13(s) {
+  if (!/^\d{13}$/.test(s) || !/^97[89]/.test(s)) return false;
+  let sum = 0;
+  for (let i = 0; i < 12; i++) sum += +s[i] * (i % 2 ? 3 : 1);
+  return (10 - sum % 10) % 10 === +s[12];
+}
+function validIsbn10(s) {
+  if (!/^\d{9}[\dX]$/.test(s)) return false;
+  let sum = 0;
+  for (let i = 0; i < 10; i++) sum += (s[i] === "X" ? 10 : +s[i]) * (10 - i);
+  return sum % 11 === 0;
+}
+function isbn10to13(s) {
+  const b = "978" + s.slice(0, 9);
+  let sum = 0;
+  for (let i = 0; i < 12; i++) sum += +b[i] * (i % 2 ? 3 : 1);
+  return b + (10 - sum % 10) % 10;
+}
+
+// --- Titelabfrage ----------------------------------------------------
+async function lookup(isbn) {
+  try {
+    const r = await fetch("https://openlibrary.org/api/books?bibkeys=ISBN:" + isbn + "&format=json&jscmd=data");
+    const d = (await r.json())["ISBN:" + isbn];
+    if (d && d.title) {
+      return { title: d.title + (d.subtitle ? ": " + d.subtitle : ""), author: (d.authors || []).map(a => a.name).join(", ") };
+    }
+  } catch (e) {}
+  try {
+    const r = await fetch("https://www.googleapis.com/books/v1/volumes?q=isbn:" + isbn);
+    const v = ((await r.json()).items || [])[0];
+    if (v && v.volumeInfo && v.volumeInfo.title) {
+      const i = v.volumeInfo;
+      return { title: i.title + (i.subtitle ? ": " + i.subtitle : ""), author: (i.authors || []).join(", ") };
+    }
+  } catch (e) {}
+  return null;
+}
+
+// --- Liste -----------------------------------------------------------
+function render() {
+  const ul = $("list");
+  ul.textContent = "";
+  items.forEach((it, idx) => {
+    const li = document.createElement("li");
+    const t = document.createElement("div"); t.className = "t";
+    const a = document.createElement("div"); a.className = "title";
+    const b = document.createElement("div"); b.className = "sub";
+    if (it.status === "loading") { a.textContent = "Suche läuft …"; }
+    else if (it.title) { a.textContent = it.title; }
+    else { a.textContent = "Kein Titel gefunden"; a.className += " nf"; }
+    b.textContent = (it.author ? it.author + " · " : "") + it.isbn;
+    t.append(a, b);
+    const x = document.createElement("button");
+    x.textContent = "✕"; x.setAttribute("aria-label", "Eintrag entfernen");
+    x.onclick = () => { items.splice(idx, 1); save(); render(); };
+    li.append(t, x);
+    ul.append(li);
+  });
+  $("count").textContent = items.length;
+}
+
+async function addIsbn(raw) {
+  let s = normalize(raw);
+  if (validIsbn10(s)) s = isbn10to13(s);
+  if (!validIsbn13(s)) { msg("Keine gültige ISBN: " + raw, true); return false; }
+  if (items.some(i => i.isbn === s)) { msg("Schon in der Liste: " + s, true); return false; }
+  const it = { isbn: s, title: "", author: "", status: "loading" };
+  items.unshift(it); render();
+  msg("ISBN " + s + " hinzugefügt.");
+  const res = await lookup(s);
+  if (res) { it.title = res.title; it.author = res.author; }
+  it.status = "done"; save(); render();
+  return true;
+}
+
+// --- Scanner ---------------------------------------------------------
+let qr = null, running = false, lastCode = "", lastTime = 0;
+
+function beep() {
+  try { navigator.vibrate && navigator.vibrate(60); } catch (e) {}
+  try {
+    const c = new (window.AudioContext || window.webkitAudioContext)();
+    const o = c.createOscillator(); o.frequency.value = 880; o.connect(c.destination);
+    o.start(); setTimeout(() => { o.stop(); c.close(); }, 90);
+  } catch (e) {}
+}
+
+function onScan(text) {
+  const now = Date.now();
+  if (text === lastCode && now - lastTime < 3000) return;
+  lastCode = text; lastTime = now;
+  if (/^97[89]\d{10}$/.test(text)) { beep(); addIsbn(text); }
+}
+
+async function startScan() {
+  if (typeof Html5Qrcode === "undefined") { msg("Scanner-Bibliothek nicht geladen. Internetverbindung prüfen.", true); return; }
+  $("reader").classList.add("on");
+  qr = qr || new Html5Qrcode("reader", {
+    formatsToSupport: [Html5QrcodeSupportedFormats.EAN_13],
+    experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+    verbose: false
+  });
+  try {
+    await qr.start({ facingMode: "environment" }, { fps: 10, qrbox: { width: 280, height: 120 } }, onScan, () => {});
+    running = true; $("toggle").textContent = "Kamera stoppen";
+    msg("Barcode auf der Buchrückseite ins Feld halten.");
+  } catch (e) {
+    $("reader").classList.remove("on");
+    msg("Kamera nicht verfügbar. Zugriff erlauben und die Seite über HTTPS öffnen.", true);
+  }
+}
+async function stopScan() {
+  try { await qr.stop(); } catch (e) {}
+  running = false; $("reader").classList.remove("on"); $("toggle").textContent = "Kamera starten";
+}
+$("toggle").onclick = () => running ? stopScan() : startScan();
+
+$("manual").onsubmit = async e => {
+  e.preventDefault();
+  if (await addIsbn($("isbn").value)) $("isbn").value = "";
+};
+
+// --- Export ----------------------------------------------------------
+function buildText() {
+  return items.slice().reverse().map(i => [i.isbn, i.title, i.author].join(";")).join("\n") + "\n";
+}
+function stamp() { return new Date().toISOString().slice(0, 10); }
+
+$("dl").onclick = () => {
+  if (!items.length) { msg("Die Liste ist leer.", true); return; }
+  const blob = new Blob([buildText()], { type: "text/plain;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = "buecher-" + stamp() + ".txt";
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+};
+$("share").onclick = async () => {
+  if (!items.length) { msg("Die Liste ist leer.", true); return; }
+  const file = new File([buildText()], "buecher-" + stamp() + ".txt", { type: "text/plain" });
+  try {
+    if (navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ files: [file] });
+    else await navigator.share({ text: buildText() });
+  } catch (e) { if (e.name !== "AbortError") msg("Teilen wird auf diesem Gerät nicht unterstützt.", true); }
+};
+$("copy").onclick = async () => {
+  if (!items.length) { msg("Die Liste ist leer.", true); return; }
+  try { await navigator.clipboard.writeText(buildText()); msg("In die Zwischenablage kopiert."); }
+  catch (e) { msg("Kopieren nicht möglich.", true); }
+};
+$("clear").onclick = () => {
+  if (items.length && confirm("Alle " + items.length + " Einträge löschen?")) { items = []; save(); render(); msg("Liste geleert."); }
+};
+
+render();
+</script>
+</body>
+</html>
