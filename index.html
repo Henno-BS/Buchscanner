@@ -101,13 +101,11 @@ async function getJson(url) {
 }
 const full = i => ({ title: i.title + (i.subtitle ? ": " + i.subtitle : ""), author: (i.authors || []).join(", ") });
 
+// Optional: eigener Google-API-Schlüssel (kostenlos), vermeidet den Fehler HTTP 429
+const GOOGLE_KEY = "AIzaSyAzBc5k53PoDBG5r6mWHM3y4CujWtIvhjk";
+
 async function lookup(isbn) {
   const errs = [];
-  try {
-    const d = await getJson("https://www.googleapis.com/books/v1/volumes?q=isbn:" + isbn + "&country=DE&maxResults=1");
-    const v = (d.items || [])[0];
-    if (v && v.volumeInfo && v.volumeInfo.title) return full(v.volumeInfo);
-  } catch (e) { errs.push("Google Books: " + e.message); }
   try {
     const d = (await getJson("https://openlibrary.org/api/books?bibkeys=ISBN:" + isbn + "&format=json&jscmd=data"))["ISBN:" + isbn];
     if (d && d.title) return full({ title: d.title, subtitle: d.subtitle, authors: (d.authors || []).map(a => a.name) });
@@ -117,6 +115,11 @@ async function lookup(isbn) {
     const v = (d.docs || [])[0];
     if (v && v.title) return full({ title: v.title, subtitle: v.subtitle, authors: v.author_name || [] });
   } catch (e) { errs.push("Open Library Suche: " + e.message); }
+  try {
+    const d = await getJson("https://www.googleapis.com/books/v1/volumes?q=isbn:" + isbn + "&country=DE&maxResults=1" + (GOOGLE_KEY ? "&key=" + GOOGLE_KEY : ""));
+    const v = (d.items || [])[0];
+    if (v && v.volumeInfo && v.volumeInfo.title) return full(v.volumeInfo);
+  } catch (e) { errs.push("Google Books: " + e.message + (/429/.test(e.message) && !GOOGLE_KEY ? " (Abfrage-Limit ohne API-Schlüssel)" : "")); }
   lookup.errs = errs;
   return null;
 }
