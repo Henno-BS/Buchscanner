@@ -17,10 +17,16 @@ button.primary{background:var(--acc);color:var(--accfg);border-color:var(--acc);
 button:focus-visible,input:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
 .row{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
 .row>*{flex:1 1 auto}
-#reader{width:100%;border-radius:10px;overflow:hidden;background:#000;display:none}
-#reader.on{display:block}
+#camwrap{width:100%;border-radius:10px;overflow:hidden;background:#000;display:none;position:relative}
+#camwrap.on{display:block}
+#camwrap video{width:100%;display:block}
+#reader{width:100%}
+.cambar{display:flex;gap:8px;padding:8px;align-items:center;background:rgba(0,0,0,.55);position:absolute;left:0;right:0;bottom:0}
+.cambar button{padding:6px 12px;font-size:.9rem}
+.cambar label{color:#fff;font-size:.85rem;display:flex;align-items:center;gap:6px;flex:1}
+.cambar input[type=range]{flex:1;min-width:60px}
 form{display:flex;gap:8px;margin:10px 0}
-input{flex:1;font:inherit;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--fg);min-width:0}
+input[type=text]{flex:1;font:inherit;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--fg);min-width:0}
 #msg{min-height:1.4em;color:var(--mute);font-size:.9rem;margin:6px 0}
 #msg.err{color:var(--err)}
 ul{list-style:none;margin:12px 0;padding:0}
@@ -40,13 +46,19 @@ li button{padding:4px 10px;flex:none}
 <main>
   <h1>Buchscanner</h1>
 
-  <div id="reader"></div>
+  <div id="camwrap">
+    <div id="reader"></div>
+    <div class="cambar">
+      <button id="torch" type="button" hidden>Licht</button>
+      <label id="zoomlbl" hidden>Zoom <input id="zoom" type="range"></label>
+    </div>
+  </div>
   <div class="row">
     <button id="toggle" class="primary">Kamera starten</button>
   </div>
 
   <form id="manual">
-    <input id="isbn" inputmode="numeric" placeholder="ISBN eintippen oder einfügen" aria-label="ISBN">
+    <input id="isbn" type="text" inputmode="numeric" placeholder="ISBN eintippen oder einfügen" aria-label="ISBN">
     <button type="submit">Hinzufügen</button>
   </form>
   <div id="msg" role="status" aria-live="polite"></div>
@@ -102,7 +114,7 @@ async function getJson(url) {
 const full = i => ({ title: i.title + (i.subtitle ? ": " + i.subtitle : ""), author: (i.authors || []).join(", ") });
 
 // Optional: eigener Google-API-Schlüssel (kostenlos), vermeidet den Fehler HTTP 429
-const GOOGLE_KEY = "AIzaSyAzBc5k53PoDBG5r6mWHM3y4CujWtIvhjk";
+const GOOGLE_KEY = "";
 
 async function lookup(isbn) {
   const errs = [];
@@ -174,9 +186,7 @@ async function addIsbn(raw) {
   return true;
 }
 
-// --- Scanner ---------------------------------------------------------
-let qr = null, running = false, lastCode = "", lastTime = 0;
-
+// --- Feedback (Licht, Vibration, Ton) --------------------------------
 const FB = {
   ok:  { color: "#2fb35a", vib: [120],         freq: 880 },
   dup: { color: "#e8a317", vib: [80, 60, 80],  freq: 400 },
@@ -195,6 +205,11 @@ function feedback(kind) {
   } catch (e) {}
 }
 
+// --- Scanner ---------------------------------------------------------
+let lastCode = "", lastTime = 0;
+let stream = null, track = null, detector = null, nativeLoop = 0;
+let qr = null, running = false;
+
 function onScan(text) {
   const now = Date.now();
   if (text === lastCode && now - lastTime < 3000) return;
@@ -202,26 +217,112 @@ function onScan(text) {
   if (/^97[89]\d{10}$/.test(text)) addIsbn(text);
 }
 
-async function startScan() {
-  if (typeof Html5Qrcode === "undefined") { msg("Scanner-Bibliothek nicht geladen. Internetverbindung prüfen.", true); return; }
-  $("reader").classList.add("on");
+// Variante A: native BarcodeDetector (Chrome/Android) mit vollem Bild
+async function startNative() {
+  detector = new BarcodeDetector({ formats: ["ean_13"] });
+  stream = await navigator.mediaDevices.getUserMedia({
+    audio: false,
+    video: {
+      facingMode: "environment",
+      width: { ideal: 1920 },
+      height: { ideal: 1080 }
+    }
+  });
+  track = stream.getVideoTracks()[0];
+  // Autofokus auf "continuous" stellen, wenn die Kamera das anbietet
+  try {
+    const caps = track.getCapabilities ? track.getCapabilities() : {};
+    if (caps.focusMode && caps.focusMode.includes("continuous"))
+      await track.applyConstraints({ advanced: [{ focusMode: "continuous" }] });
+  } catch (e) {}
+
+  const video = document.createElement("video");
+  video.playsInline = true; video.muted = true;
+  video.srcObject = stream;
+  await video.play();
+  $("reader").textContent = "";
+  $("reader").append(video);
+
+  // Taschenlampe
+  try {
+    const caps = track.getCapabilities ? track.getCapabilities() : {};
+    if (caps.torch) {
+      const b = $("torch"); b.hidden = false;
+      let on = false;
+      b.onclick = async () => { on = !on; await track.applyConstraints({ advanced: [{ torch: on }] }); b.style.fontWeight = on ? 700 : 400; };
+    }
+  } catch (e) {}
+  // Zoom
+  try {
+    const caps = track.getCapabilities ? track.getCapabilities() : {};
+    if (caps.zoom) {
+      const lbl = $("zoomlbl"), z = $("zoom");
+      z.min = caps.zoom.min; z.max = caps.zoom.max; z.step = caps.zoom.step || 0.1;
+      const cur = track.getSettings().zoom;
+      if (cur != null) z.value = cur;
+      lbl.hidden = false;
+      z.oninput = () => track.applyConstraints({ advanced: [{ zoom: +z.value }] }).catch(() => {});
+    }
+  } catch (e) {}
+
+  const scan = async () => {
+    if (!running) return;
+    try {
+      const codes = await detector.detect(video);
+      if (codes.length) onScan(codes[0].rawValue);
+    } catch (e) {}
+    nativeLoop = requestAnimationFrame(scan);
+  };
+  running = true;
+  nativeLoop = requestAnimationFrame(scan);
+}
+
+// Variante B: html5-qrcode als Fallback (z. B. iOS Safari), höhere Auflösung
+async function startFallback() {
   qr = qr || new Html5Qrcode("reader", {
     formatsToSupport: [Html5QrcodeSupportedFormats.EAN_13],
     experimentalFeatures: { useBarCodeDetectorIfSupported: true },
     verbose: false
   });
+  await qr.start(
+    { facingMode: "environment" },
+    {
+      fps: 10,
+      qrbox: view => ({ width: Math.floor(view.width * 0.9), height: Math.floor(view.height * 0.4) }),
+      videoConstraints: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }
+    },
+    onScan,
+    () => {}
+  );
+  running = true;
+}
+
+async function startScan() {
+  const hasNative = "BarcodeDetector" in window;
+  if (!hasNative && typeof Html5Qrcode === "undefined") {
+    msg("Scanner-Bibliothek nicht geladen. Internetverbindung prüfen.", true); return;
+  }
+  $("camwrap").classList.add("on");
   try {
-    await qr.start({ facingMode: "environment" }, { fps: 10, qrbox: { width: 280, height: 120 } }, onScan, () => {});
-    running = true; $("toggle").textContent = "Kamera stoppen";
-    msg("Barcode auf der Buchrückseite ins Feld halten.");
+    if (hasNative) await startNative(); else await startFallback();
+    $("toggle").textContent = "Kamera stoppen";
+    msg(hasNative
+      ? "Barcode auf der Buchrückseite ins Bild halten. Bei Bedarf Licht oder Zoom nutzen."
+      : "Barcode auf der Buchrückseite ins Feld halten.");
   } catch (e) {
-    $("reader").classList.remove("on");
+    $("camwrap").classList.remove("on");
     msg("Kamera nicht verfügbar. Zugriff erlauben und die Seite über HTTPS öffnen.", true);
   }
 }
+
 async function stopScan() {
-  try { await qr.stop(); } catch (e) {}
-  running = false; $("reader").classList.remove("on"); $("toggle").textContent = "Kamera starten";
+  running = false;
+  cancelAnimationFrame(nativeLoop);
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; track = null; }
+  if (qr) { try { await qr.stop(); } catch (e) {} }
+  $("torch").hidden = true; $("zoomlbl").hidden = true;
+  $("camwrap").classList.remove("on");
+  $("toggle").textContent = "Kamera starten";
 }
 $("toggle").onclick = () => running ? stopScan() : startScan();
 
