@@ -31,10 +31,12 @@ li .sub{color:var(--mute);font-size:.88rem;overflow-wrap:anywhere}
 li .nf{color:var(--err)}
 li button{padding:4px 10px;flex:none}
 .count{color:var(--mute);font-size:.9rem}
+#flash{position:fixed;inset:0;pointer-events:none;opacity:0;z-index:50}
 @media (prefers-reduced-motion:no-preference){li{transition:opacity .2s}}
 </style>
 </head>
 <body>
+<div id="flash"></div>
 <main>
   <h1>Buchscanner</h1>
 
@@ -160,10 +162,11 @@ function render() {
 async function addIsbn(raw) {
   let s = normalize(raw);
   if (validIsbn10(s)) s = isbn10to13(s);
-  if (!validIsbn13(s)) { msg("Keine gültige ISBN: " + raw, true); return false; }
-  if (items.some(i => i.isbn === s)) { msg("Schon in der Liste: " + s, true); return false; }
+  if (!validIsbn13(s)) { feedback("err"); msg("Keine gültige ISBN: " + raw, true); return false; }
+  if (items.some(i => i.isbn === s)) { feedback("dup"); msg("Schon in der Liste: " + s, true); return false; }
   const it = { isbn: s, title: "", author: "", status: "loading" };
   items.unshift(it); render();
+  feedback("ok");
   await fill(it);
   return true;
 }
@@ -171,12 +174,21 @@ async function addIsbn(raw) {
 // --- Scanner ---------------------------------------------------------
 let qr = null, running = false, lastCode = "", lastTime = 0;
 
-function beep() {
-  try { navigator.vibrate && navigator.vibrate(60); } catch (e) {}
+const FB = {
+  ok:  { color: "#2fb35a", vib: [120],         freq: 880 },
+  dup: { color: "#e8a317", vib: [80, 60, 80],  freq: 400 },
+  err: { color: "#d63b2f", vib: [300],         freq: 220 }
+};
+function feedback(kind) {
+  const f = FB[kind];
+  const el = $("flash");
+  el.style.background = f.color;
+  try { el.animate([{ opacity: 0.6 }, { opacity: 0 }], { duration: 500, easing: "ease-out" }); } catch (e) {}
+  try { navigator.vibrate && navigator.vibrate(f.vib); } catch (e) {}
   try {
     const c = new (window.AudioContext || window.webkitAudioContext)();
-    const o = c.createOscillator(); o.frequency.value = 880; o.connect(c.destination);
-    o.start(); setTimeout(() => { o.stop(); c.close(); }, 90);
+    const o = c.createOscillator(); o.frequency.value = f.freq; o.connect(c.destination);
+    o.start(); setTimeout(() => { o.stop(); c.close(); }, 110);
   } catch (e) {}
 }
 
@@ -184,7 +196,7 @@ function onScan(text) {
   const now = Date.now();
   if (text === lastCode && now - lastTime < 3000) return;
   lastCode = text; lastTime = now;
-  if (/^97[89]\d{10}$/.test(text)) { beep(); addIsbn(text); }
+  if (/^97[89]\d{10}$/.test(text)) addIsbn(text);
 }
 
 async function startScan() {
