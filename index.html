@@ -92,23 +92,41 @@ function isbn10to13(s) {
 }
 
 // --- Titelabfrage ----------------------------------------------------
+async function getJson(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  return r.json();
+}
+const full = i => ({ title: i.title + (i.subtitle ? ": " + i.subtitle : ""), author: (i.authors || []).join(", ") });
+
 async function lookup(isbn) {
+  const errs = [];
   try {
-    const r = await fetch("https://openlibrary.org/api/books?bibkeys=ISBN:" + isbn + "&format=json&jscmd=data");
-    const d = (await r.json())["ISBN:" + isbn];
-    if (d && d.title) {
-      return { title: d.title + (d.subtitle ? ": " + d.subtitle : ""), author: (d.authors || []).map(a => a.name).join(", ") };
-    }
-  } catch (e) {}
+    const d = await getJson("https://www.googleapis.com/books/v1/volumes?q=isbn:" + isbn + "&country=DE&maxResults=1");
+    const v = (d.items || [])[0];
+    if (v && v.volumeInfo && v.volumeInfo.title) return full(v.volumeInfo);
+  } catch (e) { errs.push("Google Books: " + e.message); }
   try {
-    const r = await fetch("https://www.googleapis.com/books/v1/volumes?q=isbn:" + isbn);
-    const v = ((await r.json()).items || [])[0];
-    if (v && v.volumeInfo && v.volumeInfo.title) {
-      const i = v.volumeInfo;
-      return { title: i.title + (i.subtitle ? ": " + i.subtitle : ""), author: (i.authors || []).join(", ") };
-    }
-  } catch (e) {}
+    const d = (await getJson("https://openlibrary.org/api/books?bibkeys=ISBN:" + isbn + "&format=json&jscmd=data"))["ISBN:" + isbn];
+    if (d && d.title) return full({ title: d.title, subtitle: d.subtitle, authors: (d.authors || []).map(a => a.name) });
+  } catch (e) { errs.push("Open Library: " + e.message); }
+  try {
+    const d = await getJson("https://openlibrary.org/search.json?q=isbn:" + isbn + "&fields=title,subtitle,author_name&limit=1");
+    const v = (d.docs || [])[0];
+    if (v && v.title) return full({ title: v.title, subtitle: v.subtitle, authors: v.author_name || [] });
+  } catch (e) { errs.push("Open Library Suche: " + e.message); }
+  lookup.errs = errs;
   return null;
+}
+
+async function fill(it) {
+  it.status = "loading"; render();
+  lookup.errs = [];
+  const res = await lookup(it.isbn);
+  if (res) { it.title = res.title; it.author = res.author; msg("Gefunden: " + res.title); }
+  else if (lookup.errs.length) msg("Abfrage fehlgeschlagen (" + lookup.errs.join("; ") + ")", true);
+  else msg("Zu dieser ISBN gibt es in keiner Datenbank einen Treffer.", true);
+  it.status = "done"; save(); render();
 }
 
 // --- Liste -----------------------------------------------------------
@@ -128,7 +146,12 @@ function render() {
     const x = document.createElement("button");
     x.textContent = "✕"; x.setAttribute("aria-label", "Eintrag entfernen");
     x.onclick = () => { items.splice(idx, 1); save(); render(); };
-    li.append(t, x);
+    if (!it.title && it.status !== "loading") {
+      const r = document.createElement("button");
+      r.textContent = "Erneut suchen";
+      r.onclick = () => fill(it);
+      li.append(t, r, x);
+    } else li.append(t, x);
     ul.append(li);
   });
   $("count").textContent = items.length;
@@ -141,10 +164,7 @@ async function addIsbn(raw) {
   if (items.some(i => i.isbn === s)) { msg("Schon in der Liste: " + s, true); return false; }
   const it = { isbn: s, title: "", author: "", status: "loading" };
   items.unshift(it); render();
-  msg("ISBN " + s + " hinzugefügt.");
-  const res = await lookup(s);
-  if (res) { it.title = res.title; it.author = res.author; }
-  it.status = "done"; save(); render();
+  await fill(it);
   return true;
 }
 
