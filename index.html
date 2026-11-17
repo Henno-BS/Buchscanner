@@ -17,16 +17,10 @@ button.primary{background:var(--acc);color:var(--accfg);border-color:var(--acc);
 button:focus-visible,input:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
 .row{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
 .row>*{flex:1 1 auto}
-#camwrap{width:100%;border-radius:10px;overflow:hidden;background:#000;display:none;position:relative}
-#camwrap.on{display:block}
-#camwrap video{width:100%;display:block}
-#reader{width:100%}
-.cambar{display:flex;gap:8px;padding:8px;align-items:center;background:rgba(0,0,0,.55);position:absolute;left:0;right:0;bottom:0}
-.cambar button{padding:6px 12px;font-size:.9rem}
-.cambar label{color:#fff;font-size:.85rem;display:flex;align-items:center;gap:6px;flex:1}
-.cambar input[type=range]{flex:1;min-width:60px}
+#reader{width:100%;border-radius:10px;overflow:hidden;background:#000;display:none}
+#reader.on{display:block}
 form{display:flex;gap:8px;margin:10px 0}
-input[type=text]{flex:1;font:inherit;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--fg);min-width:0}
+input{flex:1;font:inherit;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--fg);min-width:0}
 #msg{min-height:1.4em;color:var(--mute);font-size:.9rem;margin:6px 0}
 #msg.err{color:var(--err)}
 ul{list-style:none;margin:12px 0;padding:0}
@@ -44,35 +38,29 @@ li button{padding:4px 10px;flex:none}
 <body>
 <div id="flash"></div>
 <main>
-  <h1>Buchscanner</h1>
+  <h1>Buchscanner</h1>
 
-  <div id="camwrap">
-    <div id="reader"></div>
-    <div class="cambar">
-      <button id="torch" type="button" hidden>Licht</button>
-      <label id="zoomlbl" hidden>Zoom <input id="zoom" type="range"></label>
-      <label id="focuslbl" hidden>Fokus <input id="focus" type="range"></label>
-    </div>
-  </div>
-  <div class="row">
-    <button id="toggle" class="primary">Kamera starten</button>
-  </div>
+  <div id="reader"></div>
+  <div class="row">
+    <button id="toggle" class="primary">Kamera starten</button>
+    <button id="cam">Kamera wechseln</button>
+  </div>
 
-  <form id="manual">
-    <input id="isbn" type="text" inputmode="numeric" placeholder="ISBN eintippen oder einfügen" aria-label="ISBN">
-    <button type="submit">Hinzufügen</button>
-  </form>
-  <div id="msg" role="status" aria-live="polite"></div>
+  <form id="manual">
+    <input id="isbn" inputmode="numeric" placeholder="ISBN eintippen oder einfügen" aria-label="ISBN">
+    <button type="submit">Hinzufügen</button>
+  </form>
+  <div id="msg" role="status" aria-live="polite"></div>
 
-  <div class="count"><span id="count">0</span> Bücher in der Liste</div>
-  <ul id="list"></ul>
+  <div class="count"><span id="count">0</span> Bücher in der Liste</div>
+  <ul id="list"></ul>
 
-  <div class="row">
-    <button id="dl" class="primary">Als Textdatei speichern</button>
-    <button id="share">Teilen</button>
-    <button id="copy">Kopieren</button>
-    <button id="clear">Liste leeren</button>
-  </div>
+  <div class="row">
+    <button id="dl" class="primary">Als Textdatei speichern</button>
+    <button id="share">Teilen</button>
+    <button id="copy">Kopieren</button>
+    <button id="clear">Liste leeren</button>
+  </div>
 </main>
 
 <script>
@@ -88,29 +76,29 @@ function msg(text, err) { const m = $("msg"); m.textContent = text; m.className 
 // --- ISBN prüfen -----------------------------------------------------
 function normalize(s) { return String(s).replace(/[\s-]/g, "").toUpperCase(); }
 function validIsbn13(s) {
-  if (!/^\d{13}$/.test(s) || !/^97[89]/.test(s)) return false;
-  let sum = 0;
-  for (let i = 0; i < 12; i++) sum += +s[i] * (i % 2 ? 3 : 1);
-  return (10 - sum % 10) % 10 === +s[12];
+  if (!/^\d{13}$/.test(s) || !/^97[89]/.test(s)) return false;
+  let sum = 0;
+  for (let i = 0; i < 12; i++) sum += +s[i] * (i % 2 ? 3 : 1);
+  return (10 - sum % 10) % 10 === +s[12];
 }
 function validIsbn10(s) {
-  if (!/^\d{9}[\dX]$/.test(s)) return false;
-  let sum = 0;
-  for (let i = 0; i < 10; i++) sum += (s[i] === "X" ? 10 : +s[i]) * (10 - i);
-  return sum % 11 === 0;
+  if (!/^\d{9}[\dX]$/.test(s)) return false;
+  let sum = 0;
+  for (let i = 0; i < 10; i++) sum += (s[i] === "X" ? 10 : +s[i]) * (10 - i);
+  return sum % 11 === 0;
 }
 function isbn10to13(s) {
-  const b = "978" + s.slice(0, 9);
-  let sum = 0;
-  for (let i = 0; i < 12; i++) sum += +b[i] * (i % 2 ? 3 : 1);
-  return b + (10 - sum % 10) % 10;
+  const b = "978" + s.slice(0, 9);
+  let sum = 0;
+  for (let i = 0; i < 12; i++) sum += +b[i] * (i % 2 ? 3 : 1);
+  return b + (10 - sum % 10) % 10;
 }
 
 // --- Titelabfrage ----------------------------------------------------
 async function getJson(url) {
-  const r = await fetch(url);
-  if (!r.ok) throw new Error("HTTP " + r.status);
-  return r.json();
+  const r = await fetch(url);
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  return r.json();
 }
 const full = i => ({ title: i.title + (i.subtitle ? ": " + i.subtitle : ""), author: (i.authors || []).join(", ") });
 
@@ -118,261 +106,178 @@ const full = i => ({ title: i.title + (i.subtitle ? ": " + i.subtitle : ""), aut
 const GOOGLE_KEY = "";
 
 async function lookup(isbn) {
-  const errs = [];
-  try {
-    const d = (await getJson("https://openlibrary.org/api/books?bibkeys=ISBN:" + isbn + "&format=json&jscmd=data"))["ISBN:" + isbn];
-    if (d && d.title) return full({ title: d.title, subtitle: d.subtitle, authors: (d.authors || []).map(a => a.name) });
-  } catch (e) { errs.push("Open Library: " + e.message); }
-  try {
-    const d = await getJson("https://openlibrary.org/search.json?q=isbn:" + isbn + "&fields=title,subtitle,author_name&limit=1");
-    const v = (d.docs || [])[0];
-    if (v && v.title) return full({ title: v.title, subtitle: v.subtitle, authors: v.author_name || [] });
-  } catch (e) { errs.push("Open Library Suche: " + e.message); }
-  try {
-    const d = await getJson("https://www.googleapis.com/books/v1/volumes?q=isbn:" + isbn + "&country=DE&maxResults=1" + (GOOGLE_KEY ? "&key=" + GOOGLE_KEY : ""));
-    const v = (d.items || [])[0];
-    if (v && v.volumeInfo && v.volumeInfo.title) return full(v.volumeInfo);
-  } catch (e) { errs.push("Google Books: " + e.message + (/429/.test(e.message) && !GOOGLE_KEY ? " (Abfrage-Limit ohne API-Schlüssel)" : "")); }
-  lookup.errs = errs;
-  return null;
+  const errs = [];
+  try {
+    const d = (await getJson("https://openlibrary.org/api/books?bibkeys=ISBN:" + isbn + "&format=json&jscmd=data"))["ISBN:" + isbn];
+    if (d && d.title) return full({ title: d.title, subtitle: d.subtitle, authors: (d.authors || []).map(a => a.name) });
+  } catch (e) { errs.push("Open Library: " + e.message); }
+  try {
+    const d = await getJson("https://openlibrary.org/search.json?q=isbn:" + isbn + "&fields=title,subtitle,author_name&limit=1");
+    const v = (d.docs || [])[0];
+    if (v && v.title) return full({ title: v.title, subtitle: v.subtitle, authors: v.author_name || [] });
+  } catch (e) { errs.push("Open Library Suche: " + e.message); }
+  try {
+    const d = await getJson("https://www.googleapis.com/books/v1/volumes?q=isbn:" + isbn + "&country=DE&maxResults=1" + (GOOGLE_KEY ? "&key=" + GOOGLE_KEY : ""));
+    const v = (d.items || [])[0];
+    if (v && v.volumeInfo && v.volumeInfo.title) return full(v.volumeInfo);
+  } catch (e) { errs.push("Google Books: " + e.message + (/429/.test(e.message) && !GOOGLE_KEY ? " (Abfrage-Limit ohne API-Schlüssel)" : "")); }
+  lookup.errs = errs;
+  return null;
 }
 
 async function fill(it) {
-  it.status = "loading"; render();
-  lookup.errs = [];
-  const res = await lookup(it.isbn);
-  if (res) { it.title = res.title; it.author = res.author; msg("Gefunden: " + res.title); }
-  else if (lookup.errs.length) msg("Abfrage fehlgeschlagen (" + lookup.errs.join("; ") + ")", true);
-  else msg("Zu dieser ISBN gibt es in keiner Datenbank einen Treffer.", true);
-  it.status = "done"; save(); render();
+  it.status = "loading"; render();
+  lookup.errs = [];
+  const res = await lookup(it.isbn);
+  if (res) { it.title = res.title; it.author = res.author; msg("Gefunden: " + res.title); }
+  else if (lookup.errs.length) msg("Abfrage fehlgeschlagen (" + lookup.errs.join("; ") + ")", true);
+  else msg("Zu dieser ISBN gibt es in keiner Datenbank einen Treffer.", true);
+  it.status = "done"; save(); render();
 }
 
 // --- Liste -----------------------------------------------------------
 function render() {
-  const ul = $("list");
-  ul.textContent = "";
-  items.forEach((it, idx) => {
-    const li = document.createElement("li");
-    const t = document.createElement("div"); t.className = "t";
-    const a = document.createElement("div"); a.className = "title";
-    const b = document.createElement("div"); b.className = "sub";
-    if (it.status === "loading") { a.textContent = "Suche läuft …"; }
-    else if (it.title) { a.textContent = it.title; }
-    else { a.textContent = "Kein Titel gefunden"; a.className += " nf"; }
-    b.textContent = (it.author ? it.author + " · " : "") + it.isbn;
-    t.append(a, b);
-    const x = document.createElement("button");
-    x.textContent = "✕"; x.setAttribute("aria-label", "Eintrag entfernen");
-    x.onclick = () => { items.splice(idx, 1); save(); render(); };
-    if (!it.title && it.status !== "loading") {
-      const r = document.createElement("button");
-      r.textContent = "Erneut suchen";
-      r.onclick = () => fill(it);
-      li.append(t, r, x);
-    } else li.append(t, x);
-    ul.append(li);
-  });
-  $("count").textContent = items.length;
+  const ul = $("list");
+  ul.textContent = "";
+  items.forEach((it, idx) => {
+    const li = document.createElement("li");
+    const t = document.createElement("div"); t.className = "t";
+    const a = document.createElement("div"); a.className = "title";
+    const b = document.createElement("div"); b.className = "sub";
+    if (it.status === "loading") { a.textContent = "Suche läuft …"; }
+    else if (it.title) { a.textContent = it.title; }
+    else { a.textContent = "Kein Titel gefunden"; a.className += " nf"; }
+    b.textContent = (it.author ? it.author + " · " : "") + it.isbn;
+    t.append(a, b);
+    const x = document.createElement("button");
+    x.textContent = "✕"; x.setAttribute("aria-label", "Eintrag entfernen");
+    x.onclick = () => { items.splice(idx, 1); save(); render(); };
+    if (!it.title && it.status !== "loading") {
+      const r = document.createElement("button");
+      r.textContent = "Erneut suchen";
+      r.onclick = () => fill(it);
+      li.append(t, r, x);
+    } else li.append(t, x);
+    ul.append(li);
+  });
+  $("count").textContent = items.length;
 }
 
 async function addIsbn(raw) {
-  let s = normalize(raw);
-  if (validIsbn10(s)) s = isbn10to13(s);
-  if (!validIsbn13(s)) { feedback("err"); msg("Keine gültige ISBN: " + raw, true); return false; }
-  if (items.some(i => i.isbn === s)) { feedback("dup"); msg("Schon in der Liste: " + s, true); return false; }
-  const it = { isbn: s, title: "", author: "", status: "loading" };
-  items.unshift(it); render();
-  feedback("ok");
-  await fill(it);
-  return true;
-}
-
-// --- Feedback (Licht, Vibration, Ton) --------------------------------
-const FB = {
-  ok:  { color: "#2fb35a", vib: [120],         freq: 880 },
-  dup: { color: "#e8a317", vib: [80, 60, 80],  freq: 400 },
-  err: { color: "#d63b2f", vib: [300],         freq: 220 }
-};
-function feedback(kind) {
-  const f = FB[kind];
-  const el = $("flash");
-  el.style.background = f.color;
-  try { el.animate([{ opacity: 0.6 }, { opacity: 0 }], { duration: 500, easing: "ease-out" }); } catch (e) {}
-  try { navigator.vibrate && navigator.vibrate(f.vib); } catch (e) {}
-  try {
-    const c = new (window.AudioContext || window.webkitAudioContext)();
-    const o = c.createOscillator(); o.frequency.value = f.freq; o.connect(c.destination);
-    o.start(); setTimeout(() => { o.stop(); c.close(); }, 110);
-  } catch (e) {}
+  let s = normalize(raw);
+  if (validIsbn10(s)) s = isbn10to13(s);
+  if (!validIsbn13(s)) { feedback("err"); msg("Keine gültige ISBN: " + raw, true); return false; }
+  if (items.some(i => i.isbn === s)) { feedback("dup"); msg("Schon in der Liste: " + s, true); return false; }
+  const it = { isbn: s, title: "", author: "", status: "loading" };
+  items.unshift(it); render();
+  feedback("ok");
+  await fill(it);
+  return true;
 }
 
 // --- Scanner ---------------------------------------------------------
-let lastCode = "", lastTime = 0;
-let stream = null, track = null, detector = null, nativeLoop = 0;
-let qr = null, running = false;
+let qr = null, running = false, lastCode = "", lastTime = 0;
+
+const FB = {
+  ok:  { color: "#2fb35a", vib: [120],         freq: 880 },
+  dup: { color: "#e8a317", vib: [80, 60, 80],  freq: 400 },
+  err: { color: "#d63b2f", vib: [300],         freq: 220 }
+};
+function feedback(kind) {
+  const f = FB[kind];
+  const el = $("flash");
+  el.style.background = f.color;
+  try { el.animate([{ opacity: 0.6 }, { opacity: 0 }], { duration: 500, easing: "ease-out" }); } catch (e) {}
+  try { navigator.vibrate && navigator.vibrate(f.vib); } catch (e) {}
+  try {
+    const c = new (window.AudioContext || window.webkitAudioContext)();
+    const o = c.createOscillator(); o.frequency.value = f.freq; o.connect(c.destination);
+    o.start(); setTimeout(() => { o.stop(); c.close(); }, 110);
+  } catch (e) {}
+}
 
 function onScan(text) {
-  const now = Date.now();
-  if (text === lastCode && now - lastTime < 3000) return;
-  lastCode = text; lastTime = now;
-  if (/^97[89]\d{10}$/.test(text)) addIsbn(text);
+  const now = Date.now();
+  if (text === lastCode && now - lastTime < 3000) return;
+  lastCode = text; lastTime = now;
+  if (/^97[89]\d{10}$/.test(text)) addIsbn(text);
 }
 
-// Variante A: native BarcodeDetector (Chrome/Android) mit vollem Bild
-async function startNative() {
-  detector = new BarcodeDetector({ formats: ["ean_13"] });
-  stream = await navigator.mediaDevices.getUserMedia({
-    audio: false,
-    video: {
-      facingMode: "environment",
-      width: { ideal: 1920 },
-      height: { ideal: 1080 }
-    }
-  });
-  track = stream.getVideoTracks()[0];
-  // Autofokus auf "continuous" stellen, wenn die Kamera das anbietet
-  try {
-    const caps = track.getCapabilities ? track.getCapabilities() : {};
-    if (caps.focusMode && caps.focusMode.includes("continuous"))
-      await track.applyConstraints({ advanced: [{ focusMode: "continuous" }] });
-  } catch (e) {}
+let cams = [], camIdx = -1;
 
-  const video = document.createElement("video");
-  video.playsInline = true; video.muted = true;
-  video.srcObject = stream;
-  await video.play();
-  $("reader").textContent = "";
-  $("reader").append(video);
-
-  // Taschenlampe
-  try {
-    const caps = track.getCapabilities ? track.getCapabilities() : {};
-    if (caps.torch) {
-      const b = $("torch"); b.hidden = false;
-      let on = false;
-      b.onclick = async () => { on = !on; await track.applyConstraints({ advanced: [{ torch: on }] }); b.style.fontWeight = on ? 700 : 400; };
-    }
-  } catch (e) {}
-  // Zoom
-  try {
-    const caps = track.getCapabilities ? track.getCapabilities() : {};
-    if (caps.zoom) {
-      const lbl = $("zoomlbl"), z = $("zoom");
-      z.min = caps.zoom.min; z.max = caps.zoom.max; z.step = caps.zoom.step || 0.1;
-      const cur = track.getSettings().zoom;
-      if (cur != null) z.value = cur;
-      lbl.hidden = false;
-      z.oninput = () => track.applyConstraints({ advanced: [{ zoom: +z.value }] }).catch(() => {});
-    }
-  } catch (e) {}
-  // Manueller Fokus, falls die Kamera einen Fokus-Regler anbietet
-  try {
-    const caps = track.getCapabilities ? track.getCapabilities() : {};
-    if (caps.focusDistance) {
-      const lbl = $("focuslbl"), f = $("focus");
-      f.min = caps.focusDistance.min; f.max = caps.focusDistance.max; f.step = caps.focusDistance.step || 0.01;
-      const cur = track.getSettings().focusDistance;
-      if (cur != null) f.value = cur;
-      lbl.hidden = false;
-      f.oninput = () => track.applyConstraints({ advanced: [{ focusMode: "manual", focusDistance: +f.value }] }).catch(() => {});
-    }
-  } catch (e) {}
-
-  const scan = async () => {
-    if (!running) return;
-    try {
-      const codes = await detector.detect(video);
-      if (codes.length) onScan(codes[0].rawValue);
-    } catch (e) {}
-    nativeLoop = requestAnimationFrame(scan);
-  };
-  running = true;
-  nativeLoop = requestAnimationFrame(scan);
+async function startScan(next) {
+  if (typeof Html5Qrcode === "undefined") { msg("Scanner-Bibliothek nicht geladen. Internetverbindung prüfen.", true); return; }
+  $("reader").classList.add("on");
+  qr = qr || new Html5Qrcode("reader", {
+    formatsToSupport: [Html5QrcodeSupportedFormats.EAN_13],
+    experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+    verbose: false
+  });
+  try {
+    if (!cams.length) { try { cams = await Html5Qrcode.getCameras(); } catch (e) {} }
+    const vc = { width: { ideal: 1920 }, height: { ideal: 1080 }, advanced: [{ focusMode: "continuous" }] };
+    let source;
+    if (next && cams.length > 1) {
+      camIdx = (camIdx + 1) % cams.length;
+      source = cams[camIdx].id; vc.deviceId = { exact: source };
+    } else {
+      source = { facingMode: "environment" }; vc.facingMode = "environment";
+    }
+    await qr.start(source, { fps: 10, qrbox: { width: 280, height: 120 }, videoConstraints: vc }, onScan, () => {});
+    running = true; $("toggle").textContent = "Kamera stoppen";
+    try { await qr.applyVideoConstraints({ advanced: [{ focusMode: "continuous" }] }); } catch (e) {}
+    msg("Barcode ca. 15–20 cm entfernt ins Feld halten." + (next && cams[camIdx] ? " Kamera: " + (cams[camIdx].label || camIdx + 1) : ""));
+  } catch (e) {
+    $("reader").classList.remove("on");
+    msg("Kamera nicht verfügbar. Zugriff erlauben und die Seite über HTTPS öffnen.", true);
+  }
 }
-
-// Variante B: html5-qrcode als Fallback (z. B. iOS Safari), höhere Auflösung
-async function startFallback() {
-  qr = qr || new Html5Qrcode("reader", {
-    formatsToSupport: [Html5QrcodeSupportedFormats.EAN_13],
-    experimentalFeatures: { useBarCodeDetectorIfSupported: true },
-    verbose: false
-  });
-  await qr.start(
-    { facingMode: "environment" },
-    {
-      fps: 10,
-      qrbox: view => ({ width: Math.floor(view.width * 0.9), height: Math.floor(view.height * 0.4) }),
-      videoConstraints: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }
-    },
-    onScan,
-    () => {}
-  );
-  running = true;
-}
-
-async function startScan() {
-  const hasNative = "BarcodeDetector" in window;
-  if (!hasNative && typeof Html5Qrcode === "undefined") {
-    msg("Scanner-Bibliothek nicht geladen. Internetverbindung prüfen.", true); return;
-  }
-  $("camwrap").classList.add("on");
-  try {
-    if (hasNative) await startNative(); else await startFallback();
-    $("toggle").textContent = "Kamera stoppen";
-    msg(hasNative
-      ? "Barcode auf der Buchrückseite ins Bild halten. Bei Bedarf Licht oder Zoom nutzen."
-      : "Barcode auf der Buchrückseite ins Feld halten.");
-  } catch (e) {
-    $("camwrap").classList.remove("on");
-    msg("Kamera nicht verfügbar. Zugriff erlauben und die Seite über HTTPS öffnen.", true);
-  }
-}
-
 async function stopScan() {
-  running = false;
-  cancelAnimationFrame(nativeLoop);
-  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; track = null; }
-  if (qr) { try { await qr.stop(); } catch (e) {} }
-  $("torch").hidden = true; $("zoomlbl").hidden = true; $("focuslbl").hidden = true;
-  $("camwrap").classList.remove("on");
-  $("toggle").textContent = "Kamera starten";
+  try { await qr.stop(); } catch (e) {}
+  running = false; $("reader").classList.remove("on"); $("toggle").textContent = "Kamera starten";
 }
 $("toggle").onclick = () => running ? stopScan() : startScan();
+$("cam").onclick = async () => {
+  if (!cams.length) { try { cams = await Html5Qrcode.getCameras(); } catch (e) {} }
+  if (cams.length < 2) { msg("Keine weitere Kamera gefunden.", true); return; }
+  if (running) await stopScan();
+  startScan(true);
+};
 
 $("manual").onsubmit = async e => {
-  e.preventDefault();
-  if (await addIsbn($("isbn").value)) $("isbn").value = "";
+  e.preventDefault();
+  if (await addIsbn($("isbn").value)) $("isbn").value = "";
 };
 
 // --- Export ----------------------------------------------------------
 function buildText() {
-  return items.slice().reverse().map(i => [i.isbn, i.title, i.author].join(";")).join("\n") + "\n";
+  return items.slice().reverse().map(i => [i.isbn, i.title, i.author].join(";")).join("\n") + "\n";
 }
 function stamp() { return new Date().toISOString().slice(0, 10); }
 
 $("dl").onclick = () => {
-  if (!items.length) { msg("Die Liste ist leer.", true); return; }
-  const blob = new Blob([buildText()], { type: "text/plain;charset=utf-8" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob); a.download = "buecher-" + stamp() + ".txt";
-  document.body.append(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  if (!items.length) { msg("Die Liste ist leer.", true); return; }
+  const blob = new Blob([buildText()], { type: "text/plain;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = "buecher-" + stamp() + ".txt";
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 };
 $("share").onclick = async () => {
-  if (!items.length) { msg("Die Liste ist leer.", true); return; }
-  const file = new File([buildText()], "buecher-" + stamp() + ".txt", { type: "text/plain" });
-  try {
-    if (navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ files: [file] });
-    else await navigator.share({ text: buildText() });
-  } catch (e) { if (e.name !== "AbortError") msg("Teilen wird auf diesem Gerät nicht unterstützt.", true); }
+  if (!items.length) { msg("Die Liste ist leer.", true); return; }
+  const file = new File([buildText()], "buecher-" + stamp() + ".txt", { type: "text/plain" });
+  try {
+    if (navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ files: [file] });
+    else await navigator.share({ text: buildText() });
+  } catch (e) { if (e.name !== "AbortError") msg("Teilen wird auf diesem Gerät nicht unterstützt.", true); }
 };
 $("copy").onclick = async () => {
-  if (!items.length) { msg("Die Liste ist leer.", true); return; }
-  try { await navigator.clipboard.writeText(buildText()); msg("In die Zwischenablage kopiert."); }
-  catch (e) { msg("Kopieren nicht möglich.", true); }
+  if (!items.length) { msg("Die Liste ist leer.", true); return; }
+  try { await navigator.clipboard.writeText(buildText()); msg("In die Zwischenablage kopiert."); }
+  catch (e) { msg("Kopieren nicht möglich.", true); }
 };
 $("clear").onclick = () => {
-  if (items.length && confirm("Alle " + items.length + " Einträge löschen?")) { items = []; save(); render(); msg("Liste geleert."); }
+  if (items.length && confirm("Alle " + items.length + " Einträge löschen?")) { items = []; save(); render(); msg("Liste geleert."); }
 };
 
 render();
