@@ -204,6 +204,15 @@ function onScan(text) {
 }
 
 let cams = [], camIdx = -1;
+const CAMKEY = "buchscanner.cam";
+function savedCam() { try { return JSON.parse(localStorage.getItem(CAMKEY)); } catch (e) { return null; } }
+function findSaved() {
+  const c = savedCam();
+  if (!c) return -1;
+  let i = cams.findIndex(x => x.id === c.id);
+  if (i < 0 && c.label) i = cams.findIndex(x => x.label === c.label);
+  return i;
+}
 
 async function startScan(next) {
   if (typeof Html5Qrcode === "undefined") { msg("Scanner-Bibliothek nicht geladen. Internetverbindung prüfen.", true); return; }
@@ -218,7 +227,13 @@ async function startScan(next) {
     const vc = { width: { ideal: 1920 }, height: { ideal: 1080 }, advanced: [{ focusMode: "continuous" }] };
     let source;
     if (next && cams.length > 1) {
+      if (camIdx < 0) camIdx = findSaved();
       camIdx = (camIdx + 1) % cams.length;
+    } else if (!next) {
+      const i = findSaved();
+      if (i >= 0) camIdx = i;
+    }
+    if (camIdx >= 0 && (next || findSaved() >= 0)) {
       source = cams[camIdx].id; vc.deviceId = { exact: source };
     } else {
       source = { facingMode: "environment" }; vc.facingMode = "environment";
@@ -226,7 +241,17 @@ async function startScan(next) {
     await qr.start(source, { fps: 10, qrbox: { width: 280, height: 120 }, videoConstraints: vc }, onScan, () => {});
     running = true; $("toggle").textContent = "Kamera stoppen";
     try { await qr.applyVideoConstraints({ advanced: [{ focusMode: "continuous" }] }); } catch (e) {}
-    msg("Barcode ca. 15–20 cm entfernt ins Feld halten." + (next && cams[camIdx] ? " Kamera: " + (cams[camIdx].label || camIdx + 1) : ""));
+    // aktive Kamera bestimmen
+    let active = camIdx >= 0 ? cams[camIdx] : null;
+    try {
+      const id = qr.getRunningTrackSettings().deviceId;
+      const f = cams.find(x => x.id === id);
+      if (f) active = f;
+    } catch (e) {}
+    if (next && active) {
+      try { localStorage.setItem(CAMKEY, JSON.stringify({ id: active.id, label: active.label })); } catch (e) {}
+    }
+    msg("Kamera: " + (active ? (active.label || "ohne Namen") : "Standard") + (next && active ? " (als Standard gespeichert). " : ". ") + "Barcode ca. 15–20 cm entfernt halten.");
   } catch (e) {
     $("reader").classList.remove("on");
     msg("Kamera nicht verfügbar. Zugriff erlauben und die Seite über HTTPS öffnen.", true);
