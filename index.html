@@ -17,7 +17,7 @@ button.primary{background:var(--acc);color:var(--accfg);border-color:var(--acc);
 button:focus-visible,input:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
 .row{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
 .row>*{flex:1 1 auto}
-#reader{width:100%;border-radius:10px;overflow:hidden;background:#000;display:none}
+#reader{width:100%;max-width:260px;margin:0 auto;border-radius:10px;overflow:hidden;background:#000;display:none}
 #reader.on{display:block}
 form{display:flex;gap:8px;margin:10px 0}
 input{flex:1;font:inherit;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--fg);min-width:0}
@@ -44,6 +44,7 @@ li button{padding:4px 10px;flex:none}
   <div class="row">
     <button id="toggle" class="primary">Kamera starten</button>
     <button id="cam">Kamera wechseln</button>
+    <button id="size">Bildgröße</button>
   </div>
 
   <form id="manual">
@@ -238,7 +239,7 @@ async function startScan(next) {
     } else {
       source = { facingMode: "environment" }; vc.facingMode = "environment";
     }
-    await qr.start(source, { fps: 10, qrbox: { width: 280, height: 120 }, videoConstraints: vc }, onScan, () => {});
+    await qr.start(source, { fps: 10, qrbox: (w, h) => ({ width: Math.floor(w * 0.85), height: Math.floor(Math.min(h * 0.4, w * 0.4)) }), videoConstraints: vc }, onScan, () => {});
     running = true; $("toggle").textContent = "Kamera stoppen";
     try { await qr.applyVideoConstraints({ advanced: [{ focusMode: "continuous" }] }); } catch (e) {}
     // aktive Kamera bestimmen
@@ -262,6 +263,16 @@ async function stopScan() {
   running = false; $("reader").classList.remove("on"); $("toggle").textContent = "Kamera starten";
 }
 $("toggle").onclick = () => running ? stopScan() : startScan();
+const SIZES = [180, 260, 340];
+let sizeIdx = 1;
+try { const v = parseInt(localStorage.getItem("buchscanner.size"), 10); if (v >= 0 && v < SIZES.length) sizeIdx = v; } catch (e) {}
+function applySize() { $("reader").style.maxWidth = SIZES[sizeIdx] + "px"; }
+applySize();
+$("size").onclick = () => {
+  sizeIdx = (sizeIdx + 1) % SIZES.length; applySize();
+  try { localStorage.setItem("buchscanner.size", sizeIdx); } catch (e) {}
+  msg("Bildgröße: " + ["klein", "mittel", "groß"][sizeIdx]);
+};
 $("cam").onclick = async () => {
   if (!cams.length) { try { cams = await Html5Qrcode.getCameras(); } catch (e) {} }
   if (cams.length < 2) { msg("Keine weitere Kamera gefunden.", true); return; }
